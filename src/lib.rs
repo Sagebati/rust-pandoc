@@ -1,6 +1,7 @@
 //! API that wraps the pandoc command line tool
 
 use itertools::Itertools;
+use std::borrow::Cow;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -829,10 +830,10 @@ impl std::fmt::Display for MarkdownExtension {
 }
 
 #[derive(Clone, Debug)]
-pub enum InputKind {
+pub enum InputKind<'a> {
     Files(Vec<PathBuf>),
     /// passed to the pandoc executable through stdin
-    Pipe(String),
+    Pipe(Cow<'a, str>),
 }
 
 /// Specify whether to generate a file or pipe the output to stdout.
@@ -844,8 +845,8 @@ pub enum OutputKind {
 
 /// the argument builder
 #[derive(Default, Clone)]
-pub struct Pandoc {
-    input: Option<InputKind>,
+pub struct Pandoc<'a> {
+    input: Option<InputKind<'a>>,
     input_format: Option<(InputFormat, Vec<MarkdownExtension>)>,
     output: Option<OutputKind>,
     output_format: Option<(OutputFormat, Vec<MarkdownExtension>)>,
@@ -858,16 +859,16 @@ pub struct Pandoc {
 }
 
 /// Convenience function to call Pandoc::new()
-pub fn new() -> Pandoc {
+pub fn new<'a>() -> Pandoc<'a> {
     Pandoc::new()
 }
 
-impl Pandoc {
+impl<'a> Pandoc<'a> {
     /// Get a new Pandoc object
     /// This function returns a builder object to configure the Pandoc
     /// execution.
-    pub fn new() -> Pandoc {
-        Pandoc {
+    pub fn new() -> Self {
+        Self {
             print_pandoc_cmdline: false,
             ..Default::default()
         }
@@ -877,7 +878,7 @@ impl Pandoc {
     ///
     /// The supplied path is searched first for the latex executable, then the environment variable
     /// `PATH`, then some hard-coded location hints.
-    pub fn add_latex_path_hint<T: AsRef<Path> + ?Sized>(&mut self, path: &T) -> &mut Pandoc {
+    pub fn add_latex_path_hint<T: AsRef<Path> + ?Sized>(&mut self, path: &T) -> &mut Self {
         self.latex_path_hint.push(path.as_ref().to_owned());
         self
     }
@@ -886,13 +887,13 @@ impl Pandoc {
     ///
     /// The supplied path is searched first for the Pandoc executable, then the environment variable `PATH`, then
     /// some hard-coded location hints.
-    pub fn add_pandoc_path_hint<T: AsRef<Path> + ?Sized>(&mut self, path: &T) -> &mut Pandoc {
+    pub fn add_pandoc_path_hint<T: AsRef<Path> + ?Sized>(&mut self, path: &T) -> &mut Self {
         self.pandoc_path_hint.push(path.as_ref().to_owned());
         self
     }
 
     /// Set or overwrite the document-class.
-    pub fn set_doc_class(&mut self, class: DocumentClass) -> &mut Pandoc {
+    pub fn set_doc_class(&mut self, class: DocumentClass) -> &mut Self {
         self.options.push(PandocOption::Var(
             "documentclass".to_string(),
             Some(class.to_string()),
@@ -904,7 +905,7 @@ impl Pandoc {
     ///
     /// If set to true, the command-line to execute pandoc (as a subprocess)
     /// will be displayed on stdout.
-    pub fn set_show_cmdline(&mut self, flag: bool) -> &mut Pandoc {
+    pub fn set_show_cmdline(&mut self, flag: bool) -> &mut Self {
         self.print_pandoc_cmdline = flag;
         self
     }
@@ -914,7 +915,7 @@ impl Pandoc {
         &mut self,
         format: OutputFormat,
         extensions: Vec<MarkdownExtension>,
-    ) -> &mut Pandoc {
+    ) -> &mut Self {
         self.output_format = Some((format, extensions));
         self
     }
@@ -923,7 +924,7 @@ impl Pandoc {
         &mut self,
         format: InputFormat,
         extensions: Vec<MarkdownExtension>,
-    ) -> &mut Pandoc {
+    ) -> &mut Self {
         self.input_format = Some((format, extensions));
         self
     }
@@ -934,7 +935,7 @@ impl Pandoc {
     /// important.
     /// This function does not work, if input has been already set to standard input using
     /// [`set_input`](#method.set_input_format).
-    pub fn add_input<T: AsRef<Path> + ?Sized>(&mut self, filename: &T) -> &mut Pandoc {
+    pub fn add_input<T: AsRef<Path> + ?Sized>(&mut self, filename: &T) -> &mut Self {
         let filename = filename.as_ref().to_owned();
         match self.input {
             Some(InputKind::Files(ref mut files)) => {
@@ -963,26 +964,26 @@ impl Pandoc {
     /// let markdown = "**very** _important".into();
     /// let mut p = pandoc::new(); // assign to variable to increase life time
     /// p.set_input(pandoc::InputKind::Pipe(markdown));
-    pub fn set_input(&mut self, input: InputKind) -> &mut Pandoc {
+    pub fn set_input(&mut self, input: InputKind<'a>) -> &mut Pandoc<'a> {
         self.input = Some(input);
         self
     }
 
     /// Set or overwrite the output filename.
-    pub fn set_output(&mut self, output: OutputKind) -> &mut Pandoc {
+    pub fn set_output(&mut self, output: OutputKind) -> &mut Self {
         self.output = Some(output);
         self
     }
 
     /// Set the file name of the bibliography database.
-    pub fn set_bibliography<T: AsRef<Path> + ?Sized>(&mut self, filename: &T) -> &mut Pandoc {
+    pub fn set_bibliography<T: AsRef<Path> + ?Sized>(&mut self, filename: &T) -> &mut Self {
         self.options
             .push(PandocOption::Bibliography(filename.as_ref().to_owned()));
         self
     }
 
     /// Set the filename of the citation style file.
-    pub fn set_csl<T: AsRef<Path> + ?Sized>(&mut self, filename: &T) -> &mut Pandoc {
+    pub fn set_csl<T: AsRef<Path> + ?Sized>(&mut self, filename: &T) -> &mut Self {
         self.options
             .push(PandocOption::Csl(filename.as_ref().to_owned()));
         self
@@ -992,13 +993,13 @@ impl Pandoc {
     ///
     /// By default, documents are transformed as they are. If this option is set, a table of
     /// contents is added right in front of the actual document.
-    pub fn set_toc(&mut self) -> &mut Pandoc {
+    pub fn set_toc(&mut self) -> &mut Self {
         self.options.push(PandocOption::TableOfContents);
         self
     }
 
     /// Treat top-level headers as chapters in LaTeX, ConTeXt, and DocBook output.
-    pub fn set_chapters(&mut self) -> &mut Pandoc {
+    pub fn set_chapters(&mut self) -> &mut Self {
         self.options
             .push(PandocOption::TopLevelDivision(Tld::Chapter));
         self
@@ -1008,20 +1009,20 @@ impl Pandoc {
     ///
     /// If this function is called, all sections will be numbered. Normally, sections in LaTeX,
     /// ConTeXt, HTML, or EPUB output are unnumbered.
-    pub fn set_number_sections(&mut self) -> &mut Pandoc {
+    pub fn set_number_sections(&mut self) -> &mut Self {
         self.options.push(PandocOption::NumberSections);
         self
     }
 
     /// Set a custom latex template.
-    pub fn set_latex_template<T: AsRef<Path> + ?Sized>(&mut self, filename: &T) -> &mut Pandoc {
+    pub fn set_latex_template<T: AsRef<Path> + ?Sized>(&mut self, filename: &T) -> &mut Self {
         self.options
             .push(PandocOption::Template(filename.as_ref().to_owned()));
         self
     }
 
     /// Set the header level that causes a new slide to be generated.
-    pub fn set_slide_level(&mut self, level: u32) -> &mut Pandoc {
+    pub fn set_slide_level(&mut self, level: u32) -> &mut Self {
         self.options.push(PandocOption::SlideLevel(level));
         self
     }
@@ -1034,7 +1035,7 @@ impl Pandoc {
         &mut self,
         key: &T,
         value: &U,
-    ) -> &mut Pandoc {
+    ) -> &mut Self {
         self.options.push(PandocOption::Var(
             key.as_ref().to_owned(),
             Some(value.as_ref().to_owned()),
@@ -1051,7 +1052,7 @@ impl Pandoc {
     /// The provided filter function must live at least as long as the Pandoc instance,
     /// which will typically be achieved by making it a function, or else a closure which
     /// does not attempt to hold references to anything which isn't `'static`.
-    pub fn add_filter<F>(&mut self, filter: F) -> &mut Pandoc
+    pub fn add_filter<F>(&mut self, filter: F) -> &mut Self
     where
         F: 'static + Fn(String) -> String,
     {
@@ -1060,12 +1061,12 @@ impl Pandoc {
     }
 
     /// Add a [PandocOption](PandocOption.t.html).
-    pub fn add_option(&mut self, option: PandocOption) -> &mut Pandoc {
+    pub fn add_option(&mut self, option: PandocOption) -> &mut Self {
         self.options.push(option);
         self
     }
 
-    pub fn add_options(&mut self, options: &[PandocOption]) -> &mut Pandoc {
+    pub fn add_options(&mut self, options: &[PandocOption]) -> &mut Self {
         self.options.extend_from_slice(options);
         self
     }
@@ -1101,12 +1102,12 @@ impl Pandoc {
         cmd.env("PATH", path);
         let output = self.output.ok_or(PandocError::NoOutputSpecified)?;
         let input = self.input.ok_or(PandocError::NoInputSpecified)?;
-        let input = match input {
+        let input: Cow<'a, str> = match input {
             InputKind::Files(files) => {
                 for file in files {
                     cmd.arg(file);
                 }
-                String::new()
+                String::new().into()
             }
             InputKind::Pipe(text) => {
                 cmd.stdin(std::process::Stdio::piped());
@@ -1163,7 +1164,7 @@ impl Pandoc {
         &mut self,
         key: &T,
         value: &U,
-    ) -> &mut Pandoc {
+    ) -> &mut Self {
         self.args
             .push((key.as_ref().to_owned(), value.as_ref().to_owned()));
         self
@@ -1214,7 +1215,7 @@ impl Pandoc {
         let o = String::from_utf8(o).unwrap();
         // apply all filters
         let filtered = filters.into_iter().fold(o, |acc, item| item(acc));
-        self.input = Some(InputKind::Pipe(filtered));
+        self.input = Some(InputKind::Pipe(filtered.into()));
         Ok(())
     }
 
@@ -1234,7 +1235,9 @@ impl Pandoc {
         match output_kind {
             Some(OutputKind::File(name)) => Ok(PandocOutput::ToFile(name)),
             Some(OutputKind::Pipe) => match output_format {
-                Some((OutputFormat::Pdf | OutputFormat::Docx, ..)) => Ok(PandocOutput::ToBufferRaw(output)),
+                Some((OutputFormat::Pdf | OutputFormat::Docx, ..)) => {
+                    Ok(PandocOutput::ToBufferRaw(output))
+                }
 
                 _ => match String::from_utf8(output) {
                     Ok(string) => Ok(PandocOutput::ToBuffer(string)),
